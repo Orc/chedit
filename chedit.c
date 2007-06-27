@@ -23,7 +23,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdarg.h>
-#include <ncurses.h>
+#include <curses.h>
 #include <malloc.h>
 #include <errno.h>
 #include <unistd.h>
@@ -80,7 +80,7 @@ int	touched=0;		/* font modified? */
  */
 int	pixelmask[8] = { 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001 };
 
-char blurb[] = "CHEDIT V6 - Orc/18 March 1995";
+char blurb[] = "CHEDIT V7 - Orc/23 March 1995";
 int (*pen)();
 int pen_state;
 int confirm(char *fmt, ...);
@@ -91,7 +91,7 @@ int rolll(), rollr(), rollu(), rolld(), invert(), flipr(), flipc();
 main(argc, argv)
 char **argv;
 {
-    unsigned c;
+    register c;
     register i;
     char *shell, *getenv(), *strdup();
     char command[128];
@@ -148,11 +148,13 @@ char **argv;
 	case '=':
 	    if (confirm("Copy into this character")) {
 		dmsg("From ");
-		c = getedit();
-		for (i=0; i<ysize; i++)
-		    font[curch][i] = font[c][i];
-		updchar();
-		touched=1;
+		if ((c = getedit()) != EOF) {
+		    for (i=0; i<ysize; i++)
+			font[curch][i] = font[c][i];
+		    updchar();
+		    touched=1;
+		}
+		clearmsg();
 	    }
 	    break;
 
@@ -168,10 +170,13 @@ char **argv;
  
  	case 'G':
 	    dmsg("Get ");
-	    curch = getedit();
-	    updchar();
-	    for (i=0; i<ysize; i++)
-		undo[i] = font[curch][i];
+	    if ((c = getedit()) != EOF) {
+		curch = c;
+		updchar();
+		for (i=0; i<ysize; i++)
+		    undo[i] = font[curch][i];
+	    }
+	    clearmsg();
 	    break;
 
 	case KEY_LEFT:
@@ -206,7 +211,7 @@ char **argv;
 	case ESC: penstate(NONE);			break;
 	case 'S': slicer();				break;
 	case 'T': slicec();				break;
-	case 'V': visit();				break;
+	case 'V': visit(); clearmsg();			break;
 	case 'R':
 		if (touched && !confirm("Discard changes"))
 		    break;
@@ -236,7 +241,7 @@ char **argv;
 	case '!':
 	    dmsg("!");
 	    c = gettext(command);
-	    if (c != 0 && c != ESC)
+	    if (c != 0 && c != ESC) {
 		endwin();
 		if (system(command) >= 0) {
 		    fprintf(stdout, "[more]");
@@ -248,6 +253,9 @@ char **argv;
 		}
 		else
 		    dmsg("Cannot fork off subprocess!");
+	    }
+	    else
+		clearmsg();
 	    break;
 	}
 	refresh();
@@ -296,6 +304,8 @@ register char *s;
     register char *p = s;
     int x, y;
 
+    leaveok(stdscr, FALSE);
+    refresh();
     while ((c=getany()) != '\r' && c != '\n') {
 	if (c == 0x10 || c == 0x7f || c == KEY_BACKSPACE) {
 	    if (p > s) {
@@ -351,7 +361,7 @@ register char *name;
 	    return 0;
 	}
 	if (hdr.size > LINES-(TOPY+4)) {
-	    dmsg("Font too large for window (8x%d is max)", LINES-(TOPY-4));
+	    dmsg("Font too large for window (8x%d is max)", LINES-(TOPY+4));
 	    close(handle);
 	    return 0;
 	}
@@ -598,10 +608,11 @@ register c;
 getedit()
 {
     register c;
-    int toback;
+    int ret;
     register thisch=curch;
     register limit = 256;
 
+    leaveok(stdscr, FALSE);
     while (1) {
 	highlight(thisch, 1);
 	c = getch();
@@ -621,10 +632,19 @@ getedit()
 			    thisch += 16;
 			continue;
 	case '\n':
-	case '\r':	return thisch;
-	default:	if (isprint(c)) return c;
+	case '\r':	ret = thisch;
+			goto done;
+	case ESC:	ret = EOF;
+			goto done;
+	default:	if (isprint(c)) {
+			    ret = c;
+			    goto done;
+			}
 	}
     }
+done:
+    leaveok(stdscr, TRUE);
+    return ret;
 } /* getedit */
 
 
@@ -958,12 +978,12 @@ visit()
     char ask;
 
     dmsg("Visit ");
-    c = getedit();
+    if ((c = getedit()) == EOF)
+	return;
     shadow(c);
     dmsg("O)r, X)or, N)and, A)nd, Q)uit, ESC");
     while ((ask = getupper()) != ESC && strchr("OXNAQ", ask) == 0)
 	;
-    clearmsg();
     if (ask != ESC) {
 	for (i=0; i<ysize; i++)
 	    updcolumn(i);
@@ -989,7 +1009,7 @@ beginwin()
     raw();
     noecho();
     clear();
-    refresh();
+    leaveok(stdscr, TRUE);
     keypad(stdscr, TRUE);
 }
 

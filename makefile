@@ -2,7 +2,7 @@
 # makefile for chedit
 #
 CFLAGS= -s -O -DLINUX -DNCURSES
-LIBES=-lncurses
+LIBES=-lcurses
 CONTENTS=chedit.1 chedit.c chedit.lsm psf.h Makefile README README.ATARIST \
 	Announce
 
@@ -14,6 +14,9 @@ chedit.o: chedit.c
 
 tarball: chedit.tar.gz
 
-chedit.tar.gz: $(CONTENTS)
+clean:
+	rm -f *.o chedit
+
+chedit.tar.gz: $(CONTENTS) chedit
 	tar czvf chedit.tar.gz $(CONTENTS)
 
