@@ -1,0 +1,8 @@
+The contents of this archive:
+
+chedit.ttp:   the character set editor
+fontload.prg: an adaptation of the Dale Schumacher/John Stanley fontloading
+	      program, tweaked for my purposes.
+*.fnt:        a whole raft of degas fonts, from various sources.
+readme:       an introductory message
+contents:     this packing list

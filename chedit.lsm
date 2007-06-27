@@ -1,0 +1,18 @@
+Begin3
+Title:          Chedit
+Version:        V6
+Entered-date:   22-Mar-1995
+Description:    A psf font editor, ported from the Atari ST, and
+		inspired by the UCSD Pascal character-set editor of
+		the same name.
+Keywords:       
+Author:         orc@pell.com (David Parsons)
+Maintained-by:  orc@pell.com (David Parsons)
+Primary-site:   sunsite.unc.edu /pub/Linux/system/Keyboards
+		    510 B chedit.lsm
+		    9.3 kB chedit.tar.gz
+Alternate-site: 
+Original-site:  
+Platform:       Linux
+Copying-policy: BSD
+End

@@ -2,13 +2,38 @@
  * chedit - CHaracter EDITor, inspired by UCSD Pascal.
  *
  * "Abandon all hope, ye who enter here" -Dante
+ *
+ * Copyright (c) 1986,1994 David L. Parsons
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms are permitted
+ * provided that the above copyright notice and this paragraph are
+ * duplicated in all such forms and that any documentation,
+ * advertising materials, and other materials related to such
+ * distribution and use acknowledge that the software was developed
+ * by David L. Parsons.  My name may not be used to endorse or
+ * promote products derived from this software without specific
+ * prior written permission.
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
+
 #include <stdio.h>
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdarg.h>
-#include <atari\osbind.h>
+#include <ncurses.h>
+#include <malloc.h>
+#include <errno.h>
+#include <unistd.h>
 #undef toupper
+#undef hline
+#undef vline
+
+#include "psf.h"
+
+#define gotoxy(x,y)	move(y,x)
 
 #define	YES	1
 #define	NO	0
@@ -35,33 +60,17 @@
 #define	CLEAR	2
 #define	XOR	3
 
+#define DEPTH	32
 
 /*
- * Function key definitions
+ * font information and editing information
  */
-#define	F1	0x81
-#define	F2	0x82
-#define	F3	0x83
-#define	F4	0x84
-#define	F5	0x85
-#define	F6	0x86
-#define	F7	0x87
-#define	F8	0x88
-#define	F9	0x89
-#define	F10	0x8a
-
-#define	UNDO	0x8b
-
-/*
- * DEGAS font information and editing information
- */
-#define	FNTSIZE	0x800
 char	*fontname;
-int	handle;
-char	hasalt=0;
-unsigned char undo[16];
-unsigned char font[256][16];
+int	readonly=0;
+unsigned char undo[DEPTH];
+unsigned char font[256][DEPTH];
 unsigned char curch=127;	/* character being edited */
+int	ysize=16;		/* default to 8x16 characters */
 int	curx=0;			/* x-position */
 int	cury=0;			/* y-position */
 int	touched=0;		/* font modified? */
@@ -71,10 +80,11 @@ int	touched=0;		/* font modified? */
  */
 int	pixelmask[8] = { 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001 };
 
-char blurb[] = "CHEDIT V5 - Orc/20 June 1990";
-char *phys;
+char blurb[] = "CHEDIT V6 - Orc/18 March 1995";
 int (*pen)();
 int pen_state;
+int confirm(char *fmt, ...);
+int dmsg(char *fmt, ...);
 
 int rolll(), rollr(), rollu(), rolld(), invert(), flipr(), flipc();
 
@@ -86,13 +96,8 @@ char **argv;
     char *shell, *getenv(), *strdup();
     char command[128];
 
-    if (Getrez() != 2) {
-	fprintf(stderr, "Chedit only operates in 640x400 monochrome mode!\n");
-	exit(1);
-    }
-
     if (argc != 2) {
-	fprintf(stderr, "usage: chedit <font>\n");
+	fprintf(stderr, "usage: chedit font\n");
 	exit(1);
     }
 
@@ -106,29 +111,34 @@ char **argv;
 	exit(4);
     }
 
-    clearwin();
+    beginwin();
+    if (LINES < 24 || COLS < 80) {
+	gotoxy(0, LINES-1);
+	printw("Need at least a 24x80 screen for editing\n");
+	goodbye(5);
+    }
+
     if (!openfont(fontname)) {
-	gotoxy(0,23);
-	exit(2);
+	gotoxy(0,LINES-1);
+	goodbye(2);
     }
     init();
-    for (i=0; i<16; i++)
+    for (i=0; i<ysize; i++)
 	undo[i] = font[curch][i];
 
-    cursor(curx, cury);
+    cursor(curx, cury, 1);
     while (1) {
 	c = getany();
-	cursor(curx, cury);
-	switch ((c < 128) ? toupper(c) : c) {
+	cursor(curx, cury, 0);
+	switch (isalpha(c) ? toupper(c) : c) {
 	case 'Q':
 		if (touched && !confirm("Discard changes"))
 		    break;
-		close(handle);
 		gotoxy(0,24);
-		exit(0);
+		goodbye(0);
 	case 'C':
 	    if (confirm("Clear character")) {
-		for (i=0; i<16;i++)
+		for (i=0; i<ysize;i++)
 		    font[curch][i] = 0;
 		updchar();
 		touched=1;
@@ -139,15 +149,16 @@ char **argv;
 	    if (confirm("Copy into this character")) {
 		dmsg("From ");
 		c = getedit();
-		for (i=0; i<16; i++)
+		for (i=0; i<ysize; i++)
 		    font[curch][i] = font[c][i];
 		updchar();
 		touched=1;
 	    }
 	    break;
 
-	case UNDO:
-	    for (i=0; i<16; i++) {
+	case 'U'-'@':
+	case KEY_UNDO:
+	    for (i=0; i<ysize; i++) {
 		c = font[curch][i];
 		font[curch][i] = undo[i];
 		undo[i] = c;
@@ -159,32 +170,36 @@ char **argv;
 	    dmsg("Get ");
 	    curch = getedit();
 	    updchar();
-	    for (i=0; i<16; i++)
+	    for (i=0; i<ysize; i++)
 		undo[i] = font[curch][i];
 	    break;
 
-	case 'H': mvcur(isupper(c), curx-1, cury  );	break;
-	case 'B': mvcur(isupper(c), curx-1, cury+1);	break;
-	case 'J': mvcur(isupper(c), curx,   cury+1);	break;
-	case 'N': mvcur(isupper(c), curx+1, cury+1);	break;
-	case 'L': mvcur(isupper(c), curx+1, cury  );	break;
-	case 'U': mvcur(isupper(c), curx+1, cury-1);	break;
-	case 'K': mvcur(isupper(c), curx,   cury-1);	break;
-	case 'Y': mvcur(isupper(c), curx-1, cury-1);	break;
+	case KEY_LEFT:
+	case 'H': movecur(isupper(c), curx-1, cury  );	break;
+	case 'B': movecur(isupper(c), curx-1, cury+1);	break;
+	case KEY_DOWN:
+	case 'J': movecur(isupper(c), curx,   cury+1);	break;
+	case 'N': movecur(isupper(c), curx+1, cury+1);	break;
+	case KEY_RIGHT:
+	case 'L': movecur(isupper(c), curx+1, cury  );	break;
+	case 'U': movecur(isupper(c), curx+1, cury-1);	break;
+	case KEY_UP:
+	case 'K': movecur(isupper(c), curx,   cury-1);	break;
+	case 'Y': movecur(isupper(c), curx-1, cury-1);	break;
 	case '<': rolll(curch); updchar();		break;
 	case '>': rollr(curch); updchar();		break;
 	case '{': rollu(curch); updchar();		break;
 	case '}': rolld(curch); updchar();		break;
 	case '/': invert(curch); updchar();		break;
-	case F1: charset(rolll);			break;
-	case F2: charset(rollr);			break;
-	case F3: charset(rollu);			break;
-	case F4: charset(rolld);			break;
-	case F5: charset(invert);			break;
-	case F6: charset(flipr);			break;
-	case F7: charset(flipc);			break;
-	case F9: flipr(curch); updchar();		break;
-	case F10:flipc(curch); updchar();		break;
+	case KEY_F(1): charset(rolll);			break;
+	case KEY_F(2): charset(rollr);			break;
+	case KEY_F(3): charset(rollu);			break;
+	case KEY_F(4): charset(rolld);			break;
+	case KEY_F(5): charset(invert);			break;
+	case KEY_F(6): charset(flipr);			break;
+	case KEY_F(7): charset(flipc);			break;
+	case KEY_F(9): flipr(curch); updchar();		break;
+	case KEY_F(10):flipc(curch); updchar();		break;
 	case 'D': penstate(CLEAR); offbit();		break;
 	case 'A': penstate(SET); onbit();		break;
 	case 'X': penstate(XOR); flipbit();		break;
@@ -192,42 +207,19 @@ char **argv;
 	case 'S': slicer();				break;
 	case 'T': slicec();				break;
 	case 'V': visit();				break;
-	case 'E':
-		if (hasalt)
-		    dmsg("Alread 256 chars wide");
-		else if (confirm("Expand to 256")) {
-		    hasalt=1;
-		    touched=1;
-		    fontwin();
-		}
-		break;
-
 	case 'R':
 		if (touched && !confirm("Discard changes"))
 		    break;
 		dmsg("read (c/r = %s) ", fontname);
 		if ((c = gettext(command)) != ESC) {
-		    close(handle);
 		    if (c != 0 && openfont(command)) {
 			gotoxy(1,2);
 			for (i=0; fontname[i]; i++)
-			    fputc(' ',stdout);
-			fflush(stdout);
+			    addch(' ');
 			free(fontname);
 			fontname = strdup(command);
-			fontwin();
-			gotoxy(1,2);
-			dstring(fontname);
+			init();
 			touched=0;
-		    }
-		    else if (openfont(fontname)) {
-			fontwin();
-			touched=0;
-		    }
-		    else {
-			dmsg("lost old font - bye!");
-			fputc('\n', stdout);
-			exit(1);
 		    }
 		}
 		else
@@ -235,27 +227,31 @@ char **argv;
 		break;
 
 	case 'W':
-		lseek(handle, 0L, 0);
-		write(handle, font, hasalt ? (2*FNTSIZE) : FNTSIZE);
-		dmsg("font written");
-		touched=0;
+		if (writefont()) {
+		    dmsg("font written");
+		    touched=0;
+		}
 		break;
 
 	case '!':
 	    dmsg("!");
 	    c = gettext(command);
 	    if (c != 0 && c != ESC)
+		endwin();
 		if (system(command) >= 0) {
 		    fprintf(stdout, "[more]");
 		    fflush(stdout);
-		    getany();
+		    while (getchar() != '\n')
+			;
+		    beginwin();
 		    init();
 		}
 		else
 		    dmsg("Cannot fork off subprocess!");
 	    break;
 	}
-	cursor(curx, cury);
+	refresh();
+	cursor(curx, cury, 1);
     }
 }
 
@@ -263,35 +259,33 @@ char **argv;
 charset(function)
 int (*function)();
 {
-    register c;
+    register unsigned c;
 
-    for (c = (hasalt?256:128); c>0; --c) {
+    for (c = 0; c < 256; c++) {
 	if (function)
-	    (*function)(c-1);
-	graphic(c-1);
+	    (*function)(c);
+	graphic(c);
     }
     updchar();
 }
 
 
-mvcur(draw, newx, newy)
+movecur(draw, newx, newy)
 {
-    if (newx >= 0 && newx <= 7 && newy >= 0 && newy <= 15) {
+    if (newx >= 0 && newx <= 7 && newy >= 0 && newy < ysize) {
 	curx = newx;
 	cury = newy;
 	if (draw && pen)
 	    (*pen)();
     }
-    else {
-	putchar(7);
-	fflush(stdout);
-    }
+    else
+	beep();
 }
 
 
 clearwin()
 {
-    dstring("\033E");
+    clear();
 }
 
 
@@ -300,12 +294,16 @@ register char *s;
 {
     register c;
     register char *p = s;
+    int x, y;
 
-    while ((c=getany()) != '\r') {
-	if (c == '' || c == '') {
+    while ((c=getany()) != '\r' && c != '\n') {
+	if (c == 0x10 || c == 0x7f || c == KEY_BACKSPACE) {
 	    if (p > s) {
-		dstring("\b \b");
+		getsyx(y, x);
+		mvaddch(y, x-1, ' ');
+		move(y, x-1);
 		--p;
+		refresh();
 		continue;
 	    }
 	}
@@ -313,10 +311,11 @@ register char *s;
 	    return c;
 	else if (c >= 32 && c <= '~') {
 	    *p++ = c;
-	    Bconout(5,c);
+	    addch(c);
+	    refresh();
 	    continue;
 	}
-	Cconout(7);
+	beep();
     }
     *p = 0;
     return *s;
@@ -327,25 +326,98 @@ openfont(name)
 register char *name;
 {
     register size;
+    PSF_header hdr;
+    char *bfr;
+    int i, j;
+    int handle;
 
-    memset(font, 0, 2*FNTSIZE);
-    if ((handle = open(name, O_RDWR)) < 0) {
+    memset(font, 0, sizeof font);
+
+    if ((handle = open(name, O_RDONLY)) < 0) {
 	if (!confirm("Font %s does not exist; create it", name))
 	    return 0;
-	hasalt=0;
-	if ((handle = open(name, O_RDWR|O_CREAT|O_EXCL, 0666)) < 0) {
-	    dmsg("Cannot create %s", name);
-	    return 0;
-	}
+	ysize = 16;
+	return 1;
     }
     else {
-	size = read(handle, font, 2*FNTSIZE);
-	if (size < FNTSIZE) {
-	    dmsg("Cannot read font");
+	readonly = (access(name, W_OK) < 0);
+	if (read(handle, &hdr, sizeof hdr) != sizeof hdr) {
+	    dmsg("%s: %s", name, errno ? strerror(errno) : "read error");
 	    return 0;
 	}
-	hasalt = (size == 2*FNTSIZE);
+	if (hdr.magic != PSF_MAGIC || hdr.mode != PSF_MODE) {
+	    dmsg("Not a PSF font");
+	    close(handle);
+	    return 0;
+	}
+	if (hdr.size > LINES-(TOPY+4)) {
+	    dmsg("Font too large for window (8x%d is max)", LINES-(TOPY-4));
+	    close(handle);
+	    return 0;
+	}
+	size = (ysize=hdr.size) * 256;
+
+	if ((bfr = malloc(size)) == (char*)0) {
+	    dmsg("OUT OF MEMORY");
+	    close(handle);
+	    return 0;
+	}
+
+	if (read(handle, bfr, size) != size) {
+	    dmsg("Cannot read font");
+	    free(bfr);
+	    close(handle);
+	    return 0;
+	}
+
+	for (i=0; i<256; i++)
+	    for (j=0; j<ysize; j++)
+		font[i][j] = bfr[(i*ysize)+j];
+	free(bfr);
+	close(handle);
     }
+    return 1;
+}
+
+writefont()
+{
+    PSF_header hdr;
+    char *bfr;
+    int i, j;
+    int handle;
+    int size = ysize * 256;
+
+    hdr.magic = PSF_MAGIC;
+    hdr.mode  = PSF_MODE;
+    hdr.size  = ysize;
+
+    if ((bfr = malloc(size)) == (char*)0) {
+	dmsg("OUT OF MEMORY");
+	return 0;
+    }
+
+    if ((handle = open(fontname, O_WRONLY|O_CREAT, 0666)) < 0) {
+	dmsg("%s: %s", fontname, errno ? strerror(errno) : "open error");
+	return 0;
+    }
+    if (write(handle, &hdr, sizeof hdr) != sizeof hdr) {
+	dmsg("%s: %s", fontname, errno ? strerror(errno) : "write error");
+	close(handle);
+	return 0;
+    }
+
+    for (i=0; i<256; i++)
+	for (j=0; j<ysize; j++)
+	    bfr[(i*ysize)+j] = font[i][j];
+
+    if (write(handle, bfr, size) != size) {
+	dmsg("%s: %s", fontname, errno ? strerror(errno) : "write error");
+	free(bfr);
+	close(handle);
+	return 0;
+    }
+    close(handle);
+    free(bfr);
     return 1;
 }
 
@@ -354,54 +426,45 @@ init()
 {
     register i;
 
-    phys = (char *)Physbase();
     clearwin();
-    gotoxy(1,1);
-    dstring(blurb);
-    gotoxy(1,2);
-    dstring(fontname);
+    mvaddstr(1, 1, blurb);
+    mvaddstr(2, 1, fontname);
+    if (readonly) addstr(" (readonly)");
 
-    gotoxy(0,TOPY+1);
-    dstring("\
- G)et a character to edit\r\n\
- Q)uit chedit\r\n\
- C)lear current char\r\n\
- A)dd a bit\r\n\
- D)elete a bit\r\n\
- X)or a bit\r\n\
-\r\n\
-	 y k u\r\n\
- Moving: h   l\r\n\
-	 b j n\r\n\
-\r\n\
-	 Y K U\r\n\
- Drawing:H   L\r\n\
-	 B J N\r\n\
- Colour set by A/D/X\r\n\
- [ESC] turns off pen\r\n\
-");
+    drawbox(0,    0,       EDITX+16, 2);	/* title bar */
+    drawbox(0,    TOPY,    EDITX-2, 16);	/* help window */
+    drawbox(EDITX,TOPY,    16,   ysize);	/* edit window */
+    drawbox(CHARX,CHARY+18,16,       2);	/* mode window */
+
+    mvaddstr(TOPY+1, 1, "G)et a character to edit");
+    mvaddstr(TOPY+2, 1, "C)lear current char");
+    mvaddstr(TOPY+3, 1, "A)dd a bit");
+    mvaddstr(TOPY+4, 1, "D)elete a bit");
+    mvaddstr(TOPY+5, 1, "X)or a bit");
+
+    mvaddstr(TOPY+7, 1, "        y k u          Y K U");
+    mvaddstr(TOPY+8, 1, "Moving: h   l  Drawing:H   L");
+    mvaddstr(TOPY+9, 1, "        b j n          B J N");
+    
+    mvaddstr(TOPY+11,1, "R)ead in a font");
+    mvaddstr(TOPY+12,1, "W)rite current font");
+    mvaddstr(TOPY+13,1, "Q)uit chedit");
+
+    mvaddstr(TOPY+15,1, "Colour set by A/D/X");
+    mvaddstr(TOPY+16,1, "[ESC] turns off pen");
     pen_state = (-1);
     penstate(NONE);
+
+    mvprintw(CHARY+20, CHARX+1, "8x%d font", ysize);
     
-    box(0,    0,       EDITX+16, 2);	/* title bar */
-    box(0,    TOPY,    EDITX-2, 16);	/* help window */
-    box(EDITX,TOPY,    16,      16);	/* edit window */
-    box(CHARX,CHARY+18,16,       2);	/* mode window */
     fontwin();
+    refresh();
 }
 
 
 fontwin()
 {
-    register x, y;
-    unsigned place = CHARX + (80*16*(CHARY+10));
-
-    box(CHARX, CHARY, 16, hasalt?16:8);	/* charset display window */
-    if (!hasalt) {
-	for (y=0; y < (8*16); y++, place += 80)
-	    for (x=0; x<18; x++)
-		phys[place+x] = 0;
-    }
+    drawbox(CHARX, CHARY, 16, 16);	/* charset display window */
     charset((char *)NULL);
 }
 
@@ -425,47 +488,23 @@ penstate(state)
 }
 
 
-box(x0, y0, dx, dy)
+drawbox(x0, y0, dx, dy)
 {
-    static char vbar[] = {  0x18, 0x18, 0x18, 0x18,
-			    0x18, 0x18, 0x18, 0x18,
-			    0x18, 0x18, 0x18, 0x18,
-			    0x18, 0x18, 0x18, 0x18 };
-    static char hbar[] = {  0x00, 0x00, 0x00, 0x00,
-			    0x00, 0x00, 0x00, 0xff,
-			    0xff, 0x00, 0x00, 0x00,
-			    0x00, 0x00, 0x00, 0x00 };
-    static char uplc[] = {  0x00, 0x00, 0x00, 0x00,
-			    0x00, 0x00, 0x00, 0x0f,
-			    0x1f, 0x1c, 0x18, 0x18,
-			    0x18, 0x18, 0x18, 0x18 };
-    static char dnlc[] = {  0x18, 0x18, 0x18, 0x18,
-			    0x18, 0x18, 0x1c, 0x1f,
-			    0x0f, 0x00, 0x00, 0x00,
-			    0x00, 0x00, 0x00, 0x00 };
-    static char uprc[] = {  0x00, 0x00, 0x00, 0x00,
-			    0x00, 0x00, 0x00, 0xf0,
-			    0xf8, 0x38, 0x18, 0x18,
-			    0x18, 0x18, 0x18, 0x18 };
-    static char dnrc[] = {  0x18, 0x18, 0x18, 0x18,
-			    0x18, 0x18, 0x38, 0xf8,
-			    0xf0, 0x00, 0x00, 0x00,
-			    0x00, 0x00, 0x00, 0x00 };
     register x;
     register y;
 
     for (x=0; x<=dx; x++) {
-	blockat(x0+x, y0,      hbar);
-	blockat(x0+x, y0+dy+1, hbar);
+	mvaddch(y0,      x0+x, ACS_HLINE);
+	mvaddch(y0+dy+1, x0+x, ACS_HLINE);
     }
     for (y=0; y<=dy; y++) {
-	blockat(x0,      y0+y, vbar);
-	blockat(x0+dx+1, y0+y, vbar);
+	mvaddch(y0+y, x0,      ACS_VLINE);
+	mvaddch(y0+y, x0+dx+1, ACS_VLINE);
     }
-    blockat(x0,      y0,      uplc);
-    blockat(x0,      y0+dy+1, dnlc);
-    blockat(x0+dx+1, y0,      uprc);
-    blockat(x0+dx+1, y0+dy+1, dnrc);
+    mvaddch(y0,      x0,      ACS_ULCORNER);
+    mvaddch(y0+dy+1, x0,      ACS_LLCORNER);
+    mvaddch(y0,      x0+dx+1, ACS_URCORNER);
+    mvaddch(y0+dy+1, x0+dx+1, ACS_LRCORNER);
 }
 
 
@@ -473,7 +512,7 @@ updchar()
 {
     register y;
 
-    for (y=0; y<16; y++)
+    for (y=0; y<ysize; y++)
 	updcolumn(y);
     penstate(NONE);
     graphic(curch);
@@ -485,7 +524,7 @@ updsample()
 {
     register y;
 
-    for (y=0; y<16; y++)
+    for (y=0; y<ysize; y++)
 	blockat(CHARX+1+y, CHARY+20, font[curch]);
 }
 
@@ -498,7 +537,7 @@ updcolumn(y)
 	if (font[curch][y] & pixelmask[x])
 	    dot(x,y);
 	else
-	    clear(x,y);
+	    clearbit(x,y);
 }
 
 
@@ -532,61 +571,22 @@ flipbit()
 }
 
 
-static struct _sck {
-    unsigned scancode;
-    unsigned value;
-    unsigned shiftval;
-} mappings[] = {
-    {0x4b, 'h', 'H' },
-    {0x50, 'j', 'J' },
-    {0x4d, 'l', 'L' },
-    {0x48, 'k', 'K' },
-    {0x67, 'y', 'Y' },
-    {0x68, 'k', 'K' },
-    {0x69, 'u', 'U' },
-    {0x6a, 'h', 'H' },
-    {0x6c, 'l', 'L' },
-    {0x6d, 'b', 'B' },
-    {0x6e, 'j', 'J' },
-    {0x6f, 'n', 'N' },
-    {0x3b, F1,  F1  },
-    {0x3c, F2,  F2  },
-    {0x3d, F3,  F3  },
-    {0x3e, F4,  F4  },
-    {0x3f, F5,  F5  },
-    {0x40, F6,  F6  },
-    {0x41, F7,  F7  },
-    {0x42, F8,  F8  },
-    {0x43, F9,  F9  },
-    {0x44, F10, F10 },
-    {0x61, UNDO,UNDO},
-    {0x00, 0,   0   }
-} ;
-
 getany()
 {
-    register long key;
-    register scancode, shifted;
-    register struct _sck *map;
-
-    key = Bconin(2);
-    scancode = (key>>16) & 0x7f;
-    shifted  = (key>>16) & 0x0300;
-    for (map=mappings; map->value; ++map)
-	if (map->scancode == scancode)
-	    return shifted ? (map->shiftval) : (map->value);
-    return (int)key;
+    return getch();
 }
 
 
-highlight(x)
-register x;
+highlight(c, on)
+register c;
 {
-    register idx;
+    int x = c%16,
+	y = c/16;
+    int mode = (c & 0x80) ? A_STANDOUT : A_NORMAL;
 
-    for (idx=0; idx<16; idx++)
-	font[x][idx] = ~font[x][idx];
-    graphic(x);
+    attrset(on ? A_REVERSE : mode);
+    mvaddch(CHARY+1+y, CHARX+1+x, (char)mvinch(CHARY+1+y, CHARX+1+x));
+    attrset(A_NORMAL);
 }
 
 
@@ -597,78 +597,33 @@ register x;
  */
 getedit()
 {
-    long key;
-    register scancode;
-    register digit;
-    register unsigned c;
+    register c;
     int toback;
     register thisch=curch;
-    register limit = hasalt?256:128;
+    register limit = 256;
 
     while (1) {
-	highlight(thisch);
-	key = Bconin(2);
-	scancode = key >> 16;
-	c = key & 0xff;
-	highlight(thisch);
+	highlight(thisch, 1);
+	c = getch();
+	highlight(thisch, 0);
 
-	if (scancode >= 0x0878 && scancode <= 0x0881) {
-	    toback = c = 0;
-	    Bconout(5,'#');
-	    do {
-		digit = (scancode & 0xff) - 0x77;
-		if (digit == 10)
-		    digit = 0;
-		c = (c*10) + digit;
-		Bconout(5, digit+'0');
-		toback++;
-		key = Bconin(2);
-		scancode = key >> 16;
-	    } while (scancode >= 0x0878 && scancode <= 0x0881);
-	    while (toback-->=0)
-		dstring("\b \b");
-	    if ((key&0x7f) != '\r')
-		continue;
-	}
-	else { /* arrow keys, perhaps? */
-	    switch (scancode & 0xff) {
-	    case 0x6a:				/* keypad 4 */
-	    case 0x4b:	if (thisch>0)		/* leftarrow */
+	switch (c) {
+	case KEY_LEFT:  if (thisch>0)		/* leftarrow */
 			    --thisch;
 			continue;
-	    case 0x68:				/* keypad 8 */
-	    case 0x48:	if (thisch>=16)		/* uparrow */
+	case KEY_UP:    if (thisch>=16)		/* uparrow */
 			    thisch -= 16;
 			continue;
-	    case 0x6c:				/* keypad 6 */
-	    case 0x4d:	if (thisch < limit-1)	/* rightarrow */
+	case KEY_RIGHT: if (thisch < limit-1)	/* rightarrow */
 			    ++thisch;
 			continue;
-	    case 0x6e:				/* keypad 2 */
-	    case 0x50:	if (thisch < limit-16)	/* downarrow */
+	case KEY_DOWN: if (thisch < limit-16)	/* downarrow */
 			    thisch += 16;
 			continue;
-	    case 0x67:	if (thisch>16)		/* keypad 7 */
-			    thisch -= 17;
-			continue;
-	    case 0x69:	if (thisch>=16)		/* keypad 9 */
-			    thisch -= 15;
-			continue;
-	    case 0x6d:	if (thisch < limit-16)	/* keypad 1 */
-			    thisch += 15;
-			continue;
-	    case 0x6f:	if (thisch < limit-17)	/* keypad 3 */
-			    thisch += 17;
-			continue;
-	    case 0x72:				/* enter */
-	    case 0x1c:	c = thisch;		/* return */
-			break;
-	    }
-	    if (c == 0)			/* don't allow funny characters */
-		continue;
+	case '\n':
+	case '\r':	return thisch;
+	default:	if (isprint(c)) return c;
 	}
-	Bconout(5,c);
-	return c;
     }
 } /* getedit */
 
@@ -681,37 +636,40 @@ getupper()
 
 clearmsg()
 {
-    gotoxy(0,22);
-    dstring("\033K");
+    gotoxy(0,LINES-2);
+    clrtoeol();
+    refresh();
 }
 
 
-dmsg(fmt)
-char *fmt;
+dmsg(char *fmt, ...)
 {
     va_list ptr;
+    char bfr[200];
 
-    gotoxy(0, 22);
+    gotoxy(0, LINES-2);
     va_start(ptr, fmt);
-    vfprintf(stdout, fmt, ptr);
+    vsprintf(bfr, fmt, ptr);
     va_end(ptr);
-    fflush(stdout);
-    dstring("\033K");
+    printw("%s", bfr);
+    clrtoeol();
+    refresh();
 }
 
 
-confirm(fmt)
-char *fmt;
+confirm(char *fmt, ...)
 {
     va_list ptr;
     register c;
+    char bfr[200];
 
-    gotoxy(0, 22);
+    gotoxy(0, LINES-2);
     va_start(ptr, fmt);
-    vfprintf(stdout, fmt, ptr);
+    vsprintf(bfr, fmt, ptr);
     va_end(ptr);
-    fflush(stdout);
-    dstring("?\033K");
+    printw("%s?", bfr);
+    clrtoeol();
+    refresh();
     c = getupper();
     clearmsg();
     return (c == 'Y');
@@ -721,7 +679,7 @@ char *fmt;
 dstring(s)
 char *s;
 {
-    write(fileno(stdout), s, strlen(s));
+    addstr(s);
 }
 
 
@@ -731,52 +689,34 @@ register c;
     int x = c%16,
 	y = c/16;
 
-    blockat(CHARX+1+x, CHARY+1+y, font[c]);
+    if (c & 0x80)
+	attron(A_STANDOUT);
+    if (c == curch)
+	attron(A_REVERSE);
+    c &= 0x7f;
+    mvaddch(CHARY+1+y, CHARX+1+x, (isprint(c) && c != 0x7f) ? c : '.');
+    attroff(A_STANDOUT|A_REVERSE);
+}
+
+
+doublesq(x,y, lhs, rhs)
+char lhs, rhs;
+{
+    mvaddch(TOPY+1+y, EDITX+1+x+x, lhs); addch(rhs);
 }
 
 
 dot(x,y)
 {
-    static char dotl[] = { 0x00, 0x00, 0x00, 0x07, 0x0f, 0x1f, 0x1f, 0x1f };
-    static char dotr[] = { 0x00, 0x0 , 0x00, 0xe0, 0xf0, 0xf8, 0xf8, 0xf8 };
-
-    unsigned place = (EDITX+1)+(x*2) + (80*16*((TOPY+1)+y));
-    register i;
-
-    for (i=0; i<8; i++, place += 80) {
-	phys[place  ] = dotl[i];
-	phys[place+1] = dotr[i];
-    }
-    for (i=7; i>=0; --i, place += 80) {
-	phys[place  ] = dotl[i];
-	phys[place+1] = dotr[i];
-    }
+    doublesq(x, y, '[', ']');
 }
 
 
 halfdot(x,y)
 {
-    static char hdotl[] = { 0x00, 0x00, 0x00, 0x00, 0x03, 0x04, 0x08, 0x08 };
-    static char hdotr[] = { 0x00, 0x0 , 0x00, 0x00, 0xc0, 0x20, 0x10, 0x10 };
-
-    doublesq(x,y, hdotl, hdotr);
-}
-
-
-doublesq(x,y, lhs, rhs)
-char *lhs, *rhs;
-{
-    unsigned place = (EDITX+1)+(x*2) + (80*16*((TOPY+1)+y));
-    register i;
-
-    for (i=0; i<8; i++, place += 80) {
-	phys[place  ] ^= lhs[i];
-	phys[place+1] ^= rhs[i];
-    }
-    for (i=7; i>=0; --i, place += 80) {
-	phys[place  ] ^= lhs[i];
-	phys[place+1] ^= rhs[i];
-    }
+    attrset(A_STANDOUT);
+    doublesq(x, y, '[', ']');
+    attrset(A_NORMAL);
 }
 
 
@@ -784,45 +724,31 @@ shadow(c)
 {
     register x, y;
 
-    for (y=0; y<16; y++)
+    for (y=0; y<ysize; y++)
 	for (x=0; x<8; x++)
 	    if (font[c][y] & pixelmask[x])
 		halfdot(x,y);
 }
 
 
-cursor(x,y)
+cursor(x,y,on)
 {
-#ifdef CROSS
-    static char curl[] = { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0xff };
-    static char curr[] = { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0xff };
-#else
-    static char curl[] = { 0xff, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80 };
-    static char curr[] = { 0xff, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01 };
-#endif
-
-    doublesq(x,y,curl,curr);
+    attrset(on ? A_REVERSE : A_NORMAL);
+    mvaddch(TOPY+1+y, EDITX+1+x+x, (char)mvinch(TOPY+1+y, EDITX+1+x+x));
+    mvaddch(TOPY+1+y, EDITX+2+x+x, (char)mvinch(TOPY+1+y, EDITX+2+x+x));
+    attrset(A_NORMAL);
 }
 
 
-clear(x,y)
+clearbit(x,y)
 {
-    unsigned place = (EDITX+1)+(x*2) + (80*16*((TOPY+1)+y));
-    register i;
-
-    for (i=0; i<16; i++, place += 80)
-	phys[place] = phys[place+1] = 0;
+    doublesq(x, y, ' ', ' ');
 }
 
 
 blockat(x, y, mask)
 char *mask;
 {
-    unsigned place = x + (80*16*y);
-    register i;
-
-    for (i=0; i<16; i++, place += 80)
-	phys[place] = mask[i];
 }
 
 
@@ -833,8 +759,8 @@ unsigned c;
 
     for (i=0; i<8; i++) {
 	carry = font[c][i];
-	font[c][i] = font[c][15-i];
-	font[c][15-i] = carry;
+	font[c][i] = font[c][ysize-i];
+	font[c][ysize-i] = carry;
     }
     touched=1;
 }
@@ -845,7 +771,7 @@ unsigned c;
 {
     register carry, i, j;
 
-    for (i=0; i<16; i++) {
+    for (i=0; i<ysize; i++) {
 	carry = 0;
 	for (j=0; j<8; j++)
 	    if (font[c][i] & pixelmask[j])
@@ -861,7 +787,7 @@ unsigned c;
 {
     register i;
 
-    for (i=0; i<16;i++)
+    for (i=0; i<ysize;i++)
 	font[c][i] = ~font[c][i];
     touched=1;
 }
@@ -871,7 +797,7 @@ rolll(c)
 {
     register carry, i;
 
-    for (i=0; i<16;i++) {
+    for (i=0; i<ysize;i++) {
 	carry = font[c][i] & 0x80;
 	font[c][i] <<= 1;
 	if (carry)
@@ -885,7 +811,7 @@ rollr(c)
 {
     register carry, i;
 
-    for (i=0; i<16;i++) {
+    for (i=0; i<ysize;i++) {
 	carry = font[c][i] & 0x01;
 	font[c][i] >>= 1;
 	if (carry)
@@ -900,9 +826,9 @@ rollu(c)
     register carry, i;
 
     carry = font[c][0];
-    for (i=1; i<16;i++)
+    for (i=1; i<ysize;i++)
 	font[c][i-1] = font[c][i];
-    font[c][15] = carry;
+    font[c][ysize-1] = carry;
     touched=1;
 }
 
@@ -911,33 +837,26 @@ rolld(c)
 {
     register carry, i;
 
-    carry = font[c][15];
-    for (i=14; i>=0; --i)
+    carry = font[c][ysize-1];
+    for (i=ysize-2; i>=0; --i)
 	font[c][i+1] = font[c][i];
     font[c][0] = carry;
     touched=1;
 }
 
 
-hline(y)
+hline(y, on)
 {
-    register place = (EDITX+1) + (80*(8+(16*(TOPY+1+y))));
-    register i;
+    register x;
 
-    phys[place-240]   ^= 0x80;
-    phys[place-160]   ^= 0xc0;
-    phys[place-80]    ^= 0xe0;
-    phys[place+80]    ^= 0xe0;
-    phys[place+160]   ^= 0xc0;
-    phys[place+240]   ^= 0x80;
-    for (i=0; i<16; i++)
-	phys[place+i] ^= 0xff;
-    phys[place+15-240]^= 0x01;
-    phys[place+15-160]^= 0x03;
-    phys[place+15-80] ^= 0x07;
-    phys[place+15+80] ^= 0x07;
-    phys[place+15+160]^= 0x03;
-    phys[place+15+240]^= 0x01;
+    attrset(on ? (A_STANDOUT|A_REVERSE) : A_NORMAL);
+
+    for (x=0; x<8; x++) {
+	mvaddch(TOPY+1+y, EDITX+1+x+x, (char)mvinch(TOPY+1+y, EDITX+1+x+x));
+	mvaddch(TOPY+1+y, EDITX+2+x+x, (char)mvinch(TOPY+1+y, EDITX+2+x+x));
+    }
+
+    attrset(A_NORMAL);
 }
 
 
@@ -947,28 +866,28 @@ slicer()
     register y;
 
     dmsg("Slice row: J,K move slice, ESC aborts, D)elete, I)insert");
-    hline(y=cury);
+    hline(y=cury, YES);
     while ((c=getupper()) != ESC && c != 'D' && c != 'I') {
-	hline(y);
-	if (c == 'J' && y < 15)
+	hline(y, NO);
+	if ((c == 'J' || c == KEY_DOWN) && y < ysize-1)
 	    ++y;
-	else if (c == 'K' && y > 0)
+	else if ((c == 'K' || c == KEY_UP) && y > 0)
 	    --y;
-	hline(y);
+	hline(y, YES);
     }
-    hline(y);
+    hline(y, NO);
     switch (c) {
     case 'D':
-	while (y < 15) {
+	while (y < ysize-1) {
 	    font[curch][y] = font[curch][y+1];
 	    ++y;
 	}
-	font[curch][15] = 0;
+	font[curch][ysize-1] = 0;
 	updchar();
 	touched=1;
 	break;
     case 'I':
-	for (i=14;i>=y;--i)
+	for (i=ysize-2;i>=y;--i)
 	    font[curch][i+1] = font[curch][i];
 	updchar();
 	touched=1;
@@ -978,30 +897,16 @@ slicer()
 }
 
 
-vline(x)
+vline(x, on)
 {
-    register place = (EDITX+1+x+x) + (80*(8+(16*(TOPY+1))));
-    register i;
+    register y;
 
-    phys[place]       ^= 0x0f;
-    phys[place+1]     ^= 0xe0;
-    place += 80;
-    phys[place]       ^= 0x07;
-    phys[place+1]     ^= 0xc0;
-    place += 80;
-    phys[place]       ^= 0x03;
-    phys[place+1]     ^= 0x80;
-    place += 80;
-    for (i=0; i<((13*16)+(2*13)); i++, place += 80)
-	phys[place]   ^= 0x01;
-    phys[place]       ^= 0x03;
-    phys[place+1]     ^= 0x80;
-    place += 80;
-    phys[place]       ^= 0x07;
-    phys[place+1]     ^= 0xc0;
-    place += 80;
-    phys[place]       ^= 0x0f;
-    phys[place+1]     ^= 0xe0;
+    attrset(on ? (A_STANDOUT|A_REVERSE) : A_NORMAL);
+
+    for (y=0; y<ysize; y++)
+	mvaddch(TOPY+1+y, EDITX+1+x+x, (char)mvinch(TOPY+1+y, EDITX+1+x+x));
+
+    attrset(A_NORMAL);
 }
 
 
@@ -1015,20 +920,20 @@ slicec()
     register unsigned rhs;
 
     dmsg("Slice column: H,L move slice, ESC aborts, D)elete, I)insert");
-    vline(x=curx);
+    vline(x=curx, YES);
     while ((c=getupper()) != ESC && c != 'D' && c != 'I') {
-	vline(x);
-	if (c == 'L' && x < 7)
+	vline(x, NO);
+	if ((c == 'L' || c == KEY_RIGHT) && x < 7)
 	    ++x;
-	else if (c == 'H' && x > 0)
+	else if ((c == 'H' || c == KEY_LEFT) && x > 0)
 	    --x;
-	vline(x);
+	vline(x, YES);
     }
-    vline(x);
+    vline(x, NO);
     clearmsg();
     if (c == ESC)
 	return;
-    for (i=0; i<16; i++) {
+    for (i=0; i<ysize; i++) {
 	if (c == 'D') {
 	    rhs = font[curch][i] & bitmask[x+1];
 	    font[curch][i] &= ~bitmask[x];
@@ -1059,10 +964,12 @@ visit()
     while ((ask = getupper()) != ESC && strchr("OXNAQ", ask) == 0)
 	;
     clearmsg();
-    if (ask != ESC)
-	shadow(c);
+    if (ask != ESC) {
+	for (i=0; i<ysize; i++)
+	    updcolumn(i);
+    }
     if (ask != ESC && ask != 'Q') {
-	for (i=0; i<16; i++)
+	for (i=0; i<ysize; i++)
 	    switch (ask) {
 	    case 'O': font[curch][i] |= font[c][i];	break;
 	    case 'A': font[curch][i] &= font[c][i];	break;
@@ -1072,4 +979,23 @@ visit()
 	updchar();
 	touched=1;
     }
+}
+
+
+beginwin()
+{
+    if (!initscr())
+	exit(9);
+    raw();
+    noecho();
+    clear();
+    refresh();
+    keypad(stdscr, TRUE);
+}
+
+
+goodbye(code)
+{
+    endwin();
+    exit(code);
 }

@@ -1,0 +1,26 @@
+Since I've not found one to my liking, I've ported a font-editor of
+mine over to Linux.  This is a moderately ancient editor -- it is
+ported from a Atari ST font editor that I wrote in the late 1980s,
+and is based on a UCSD Pascal font editor that was written in the
+late 1970s.  This version is designed to work only with psf-style
+fonts (one of the formats that setfont is able to read.)
+
+The source, in case you're interested, is written in the same style
+as the original UCSD code -- cryptic and almost comment-free. But,
+unlike the original code, it's actually somewhat readable; I dug the 
+editor out of my archives and ported it to Linux in about 8 hours
+while waiting for a collection of database jobs to finish.
+
+The editor can be found at
+
+    ftp://sunsite.unc.edu/pub/Linux/Incoming/chedit.tar.gz,
+
+hopefully soon to move to
+
+    ftp://sunsite.unc.edu/pub/Linux/system/Keyboards/chedit.tar.gz
+
+where it can live alongside the fonts it can edit.
+
+                ____
+  david parsons \bi/ Font Queens of the world, unite.
+                 \/

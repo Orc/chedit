@@ -1,0 +1,178 @@
+.TH chedit 1 ""
+.ds n 5
+.ds d chedit
+.SH NAME
+\fBchedit\fR - \fICH\fRaracter set \fIEDIT\fRor
+.SH SYNOPSIS
+\fBchedit\fR \fIfont\fR
+.br
+.SH DESCRIPTION
+\fBChedit\fR is a font-editor for \fBpsf\fR fonts. It is based upon
+the similarly-named utility for \fBUCSD Pascal\fR, and shares many
+of its infuriating qualities, like an almost complete lack of
+comments, a somewhat baffling user interface, and pitifully
+inadequate documentation.
+
+When \fBChedit\fR starts up, it clears the screen and throws up a
+collection of windows, as below:
+
+.nf
+    ------------------  ---------
+    |filename window |  |Charset|
+    ------------------  |Window |
+    --------- --------  |       |
+    |Help   | |Edit  |  |       |
+    |Window | |Window|  ---------
+    |       | |      |  ---------
+    |       | |      |  |Info   |
+    --------- --------  ---------
+.fi
+Then sits there waiting for input.
+
+When editing, you'll be working in the \fIedit window\fb, which
+displays the character that you're currently editing. \fBChedit\fR
+treats the cursor as a pen, with different pencolors that you can
+set to draw, erase, or invert bits in the current character, and
+has motion commands for drawing while you move, as well as moving
+without drawing anything.  Mouse commands are not, however,
+supported.  Perhaps in the next version.
+
+\fBChedit\fR accepts the following commands:
+.TP
+Q
+quit chedit.  If the character set has been modified, you will be
+asked if you want to discard the changes.
+.TP
+C
+erases the current character.  You will be asked if you really want
+to do this action.
+.TP
+=
+copies another character over this character.
+When you're prompted for a character to copy in, you may type a
+character, or you may use the \fIARROW\fR keys to move around the
+charset window (and select a character by pressing \fBreturn\fF.)
+.TP
+UNDO
+undoes all changes you've made since you started changing this
+character (If your terminal doesn't have an \fIUNDO\fB key,
+\fB^U\fR takes its place.) or since your last undo.
+.TP
+G
+goes to another character. You select the new character just like
+you would with the \fB=\fR command.
+.TP
+D
+sets the pencolor to erase.
+.TP
+A
+sets the pencolor to write.
+.TP
+X
+sets the pencolor to \fIinvert\fR the bit under the cursor.
+.TP
+ESC
+turns the pencolor off.
+.TP
+The \fIARROW\fR keys
+on your terminal, as well as the traditional \fBh, j, k\fR, and \fB
+l\fR keys, are used to move the cursor around the character being
+edited.  Capitol \fBH, J, K\fR, and \fB L\fR do the same, except
+they also draw on the character with the current \fBpencolor\fR,
+if you've set one.
+.TP
+b, n, u, y
+are used to move \fIdiagonally\fR around the character. Capitol
+letters do the same, except they also draw.
+.TP
+<
+Rotates the current character one column to the left.
+.TP
+F1
+Rotates the entire character set one column to the left.
+.TP
+>
+Rotates the current character one column to the right.
+.TP
+F2
+Rotates the entire character set one column to the right.
+.TP
+{
+Rotates the current character one row upwards.
+.TP
+F3
+Rotates the entire character set one row upwards.
+.TP
+}
+Rotates the current character one row downwards.
+.TP
+F4
+Rotates the entire character set one row downwards.
+.TP
+/
+Inverts the character.  (All set bits are cleared, all clear bits
+are set.)
+.TP
+F5
+Inverts the entire character set.
+.TP
+F6
+Flips the entire character set top-for-bottom.
+.TP
+F9
+Flips the current character top-for-bottom.
+.TP
+F7
+Flips the entire character set left-for-right.
+.TP
+F10
+Flips the current character left-for-right.
+.TP
+S
+lets you insert or delete a row in the current character.
+When you type this command, a row is highlighted and a menu is
+placed at the bottom of the screen, telling you what you can do.
+You can locate the row by the appropriate arrow keys (and, of
+course, \fB K\fR and \fB J\fR), then type \fB D\fR to delete this
+row or \fB I\fRto duplicate it.
+.TP
+T
+lets you insert or delete a column in the current character.
+This is like the \fB S\fR command, except that you use \fB H\fR
+and \fB L\fR to move the bar around.
+.TP
+V
+visit another character, optionally copying it over the current
+character.  This command asks you to select a character, then
+displays your selection over the current character, with bits
+set in the visited character highlighted.  You may map this
+character over the current character with a variety of modes
+(\fBOr\fR just copies over the old character, \fBNand\fR erases
+this character from the old one, \fBXor\fR erases bits that are set
+in both characters, otherwise copies the new character over the
+old, \fBAnd\fR erases all bits that both characters don't have in
+common, and finally \fBQuit\fR and \fBESC\fR simply exit without
+changing anything, though \fBESC\fR leaves the outline of the
+visited character in the editing window.)
+.TP
+R
+read a new font, or reread the old one.  If you've made changes to
+the current font, you'll be asked if you want to discard the
+changes you've made to it.
+.TP
+W
+writes the current font out.
+.TP
+!
+accepts a command line, then does a shell escape.
+.SH SEE ALSO
+\fBsetfont\fR(8)
+.SH NOTES
+None of the nonprinting, and the upper 128 characters are not
+displayed properly in the charset
+window.
+
+\fBUSCD Pascal\fR is probably a copyright of the Regents of the
+University of California.
+.SH AUTHOR
+David Parsons (orc@pell.com)

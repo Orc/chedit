@@ -1,0 +1,10 @@
+
+Chedit is an incredibly inflexible character set editor for degas-style
+monochrome 8x16 fonts.  It only works on standard (not Moniterm) monochrome
+moniter-equipped STs (It may work on a STe, but it's never been tested.)
+The source is written in the spirit of Chedit on the Terak 8510a, for those
+of you into random historia, and, in keeping with its history, is written
+with a fairly odd style and almost no documentation.
+
+		  __
+ david parsons    \/
