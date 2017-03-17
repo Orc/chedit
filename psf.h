@@ -8,4 +8,4 @@ typedef struct psf_header {
     int size :  8;
 } PSF_header;
 
-#endif PSF_MAGIC
+#endif/*PSF_MAGIC*/
