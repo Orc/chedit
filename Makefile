@@ -9,7 +9,7 @@ CONTENTS=chedit.1 chedit.c chedit.lsm psf.h Makefile README README.ATARIST \
 chedit: chedit.o
 	cc $(CFLAGS) -o chedit chedit.o $(LIBES)
 
-chedit.o: chedit.c
+chedit.o: chedit.c psf.h
 	cc $(CFLAGS) -c chedit.c
 
 tarball: chedit.tar.gz
