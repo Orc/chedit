@@ -1016,6 +1016,7 @@ beginwin()
 
 goodbye(code)
 {
+    printw("[Press any key to exit]");getupper();
     endwin();
     exit(code);
 }
