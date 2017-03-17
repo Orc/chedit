@@ -24,7 +24,6 @@
 #include <fcntl.h>
 #include <stdarg.h>
 #include <curses.h>
-#include <malloc.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -952,7 +951,7 @@ slicec()
     draw_vline(x, NO);
     clearmsg();
     if (c == ESC)
-	return;
+	return 0;
     for (i=0; i<ysize; i++) {
 	if (c == 'D') {
 	    rhs = font[curch][i] & bitmask[x+1];
@@ -979,7 +978,7 @@ visit()
 
     dmsg("Visit ");
     if ((c = getedit()) == EOF)
-	return;
+	return 0;
     shadow(c);
     dmsg("O)r, X)or, N)and, A)nd, Q)uit, ESC");
     while ((ask = getupper()) != ESC && strchr("OXNAQ", ask) == 0)
@@ -1016,7 +1015,10 @@ beginwin()
 
 goodbye(code)
 {
-    printw("[Press any key to exit]");getupper();
+    if ( code != 0 ) {
+	printw("[Press any key to exit]");
+	getupper();
+    }
     endwin();
     exit(code);
 }
