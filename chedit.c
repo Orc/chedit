@@ -27,9 +27,9 @@
 #include <malloc.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
 #undef toupper
-#undef hline
-#undef vline
 
 #include "psf.h"
 
@@ -93,7 +93,7 @@ char **argv;
 {
     register c;
     register i;
-    char *shell, *getenv(), *strdup();
+    char *shell;
     char command[128];
 
     if (argc != 2) {
@@ -216,7 +216,7 @@ char **argv;
 		if (touched && !confirm("Discard changes"))
 		    break;
 		dmsg("read (c/r = %s) ", fontname);
-		if ((c = gettext(command)) != ESC) {
+		if ((c = readline(command)) != ESC) {
 		    if (c != 0 && openfont(command)) {
 			gotoxy(1,2);
 			for (i=0; fontname[i]; i++)
@@ -240,7 +240,7 @@ char **argv;
 
 	case '!':
 	    dmsg("!");
-	    c = gettext(command);
+	    c = readline(command);
 	    if (c != 0 && c != ESC) {
 		endwin();
 		if (system(command) >= 0) {
@@ -297,7 +297,7 @@ clearwin()
 }
 
 
-gettext(s)
+readline(s)
 register char *s;
 {
     register c;
@@ -865,7 +865,7 @@ rolld(c)
 }
 
 
-hline(y, on)
+draw_hline(y, on)
 {
     register x;
 
@@ -886,16 +886,16 @@ slicer()
     register y;
 
     dmsg("Slice row: J,K move slice, ESC aborts, D)elete, I)insert");
-    hline(y=cury, YES);
+    draw_hline(y=cury, YES);
     while ((c=getupper()) != ESC && c != 'D' && c != 'I') {
-	hline(y, NO);
+	draw_hline(y, NO);
 	if ((c == 'J' || c == KEY_DOWN) && y < ysize-1)
 	    ++y;
 	else if ((c == 'K' || c == KEY_UP) && y > 0)
 	    --y;
-	hline(y, YES);
+	draw_hline(y, YES);
     }
-    hline(y, NO);
+    draw_hline(y, NO);
     switch (c) {
     case 'D':
 	while (y < ysize-1) {
@@ -917,7 +917,7 @@ slicer()
 }
 
 
-vline(x, on)
+draw_vline(x, on)
 {
     register y;
 
@@ -940,16 +940,16 @@ slicec()
     register unsigned rhs;
 
     dmsg("Slice column: H,L move slice, ESC aborts, D)elete, I)insert");
-    vline(x=curx, YES);
+    draw_vline(x=curx, YES);
     while ((c=getupper()) != ESC && c != 'D' && c != 'I') {
-	vline(x, NO);
+	draw_vline(x, NO);
 	if ((c == 'L' || c == KEY_RIGHT) && x < 7)
 	    ++x;
 	else if ((c == 'H' || c == KEY_LEFT) && x > 0)
 	    --x;
-	vline(x, YES);
+	draw_vline(x, YES);
     }
-    vline(x, NO);
+    draw_vline(x, NO);
     clearmsg();
     if (c == ESC)
 	return;
