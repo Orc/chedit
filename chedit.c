@@ -80,7 +80,7 @@ int	touched=0;		/* font modified? */
  */
 int	pixelmask[8] = { 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001 };
 
-char blurb[] = "CHEDIT V7 - Orc/23 March 1995";
+char blurb[] = "CHEDIT V" VERSION " - Orc/" BUILD_DATE;
 int (*pen)();
 int pen_state;
 int confirm(char *fmt, ...);
