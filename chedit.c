@@ -308,7 +308,7 @@ register char *s;
     while ((c=getany()) != '\r' && c != '\n') {
 	if (c == 0x10 || c == 0x7f || c == KEY_BACKSPACE) {
 	    if (p > s) {
-		getsyx(y, x);
+		getyx(curscr, y, x);
 		mvaddch(y, x-1, ' ');
 		move(y, x-1);
 		--p;
